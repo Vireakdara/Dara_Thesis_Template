@@ -1,0 +1,411 @@
+\chapter{Introduction}
+\label{chap:intro}
+
+%% ── 1.1 ─────────────────────────────────────────────────────────────────────
+\section{Background and Motivation for the Research}
+\label{sec:background}
+
+Object detection --- the joint localisation and classification of all objects present
+in an image --- constitutes one of the most fundamental problems in computer vision,
+with direct applications spanning autonomous navigation, medical image analysis,
+industrial quality control, and security monitoring. The central challenge lies in
+simultaneously maximising detection accuracy and minimising computational latency,
+particularly under the resource constraints imposed by real-time deployment scenarios.
+
+Significant progress has been made over the past decade. The establishment of
+large-scale benchmarks such as MS~COCO~\cite{lin2014coco} and
+PASCAL~VOC~\cite{everingham2015pascal}, together with open-source infrastructure
+projects including Detectron2~\cite{wu2019detectron2},
+MMDetection~\cite{chen2019mmdetection}, and MMYOLO~\cite{mmyolo2023}, standardised
+experimental protocols and enabled reproducible comparisons across architectures.
+Within this environment, single-stage detectors dominated practical applications:
+the SSD family~\cite{liu2016ssd} enabled multi-scale predictions in a single forward
+pass, while successive YOLO releases progressively refined the speed-accuracy
+trade-off without sacrificing the throughput that defines the YOLO paradigm.
+YOLOv4~\cite{bochkovskiy2020yolov4} systematically combined training enhancements
+--- Mosaic augmentation, DropBlock regularisation, and DIoU-NMS post-processing ---
+under the ``bag of freebies'' methodology, demonstrating that disciplined training
+design alone could push accuracy substantially without modifying the inference graph.
+YOLOv5~\cite{jocher2020yolov5}, YOLOv7~\cite{wang2023yolov7}, and
+YOLOv8~\cite{jocher2023yolov8} refined backbone topology, introduced anchor-free
+detection heads, and expanded deployment support, collectively establishing the
+modern YOLO ecosystem.
+
+The most consequential recent advances came with YOLOv9~\cite{wang2024yolov9} and
+YOLO11~\cite{khanam2024yolo11}. YOLOv9 introduced two architectural innovations ---
+the Generalised Efficient Layer Aggregation Network (GELAN) backbone, which aggregates
+multiple internal feature paths to preserve gradient diversity across depth, and
+Programmable Gradient Information (PGI), which installs auxiliary reversible branches
+during training to steer gradients toward information-deficient channels, directly
+addressing the feature attenuation that plagued earlier CSP-based designs.
+YOLOv10~\cite{wang2024yolov10} demonstrated end-to-end detection without
+non-maximum suppression through consistent dual assignment training. YOLO11
+introduced C3k2 blocks with dual-convolution bottlenecks and C2PSA position-sensitive
+attention at the deepest backbone stage, achieving strong parameter efficiency with
+competitive accuracy.
+
+Alongside convolutional detectors, Transformer-based architectures have expanded the
+design space significantly. DETR~\cite{carion2020detr} cast detection as a set
+prediction problem with bipartite matching, eliminating hand-crafted anchors.
+Deformable~DETR~\cite{zhu2021deformable} resolved its slow convergence through sparse
+deformable attention. DINO~\cite{zhang2023dino} accelerated training through denoising
+queries and improved anchor initialisation. The Swin Transformer~\cite{liu2021swin}
+provided hierarchical multi-scale representations through shifted window attention,
+becoming a widely adopted detection backbone. Deep residual networks~\cite{he2016resnet}
+and Cross-Stage Partial connections (CSPNet)~\cite{wang2020cspnet} --- the direct
+architectural ancestors of C2f and C3k2 --- established the foundational design
+vocabulary that the entire YOLO family inherits.
+
+A parallel and increasingly important development is the emergence of vision--language
+detection frameworks, enabled by the contrastive pretraining paradigm pioneered by
+CLIP~\cite{radford2021clip}. GLIP~\cite{li2022glip} unified phrase grounding and object
+detection through grounded language-image pretraining, achieving strong open-vocabulary
+results. GLIPv2~\cite{zhang2022glipv2} extended this with a unified pretraining
+objective combining detection, grounding, and image-text matching.
+OWL-ViT~\cite{minderer2022owlvit} demonstrated that pretrained vision-language models
+could be directly adapted for open-vocabulary detection with minimal modification.
+YOLO-World~\cite{cheng2024yoloworld} brought these capabilities into the real-time
+regime by embedding CLIP text features into the YOLO pipeline, achieving practical
+inference speeds with open-vocabulary generalisation. Feature-wise Linear Modulation
+(FiLM)~\cite{perez2018film} demonstrated that per-channel learned affine
+transformations conditioned on external signals --- scaling ($\gamma$) and shifting
+($\beta$) --- can selectively recalibrate intermediate representations with $O(N)$
+complexity, far more efficiently than self-attention mechanisms.
+
+Despite this remarkable progress, three persistent gaps motivate the present
+dissertation. First, cross-generation YOLO benchmarking remains absent under
+controlled conditions: each version is evaluated under its own protocol, making
+principled backbone selection difficult. Second, backbone feature degradation and
+static neck fusion remain jointly unaddressed --- YOLOv9's PGI partially improves
+the backbone side, but no real-time detector integrates externally guided semantic
+conditioning directly into multi-scale neck fusion. Third, text--visual alignment in
+existing real-time frameworks is coarse and scale-agnostic, applying uniform text
+signals across pyramid levels that encode fundamentally different spatial and semantic
+content.
+
+An important clarification shapes the experimental scope of this work. Chapters~II
+and~III address different detection tasks with different evaluation conditions.
+Chapter~II benchmarks YOLO architectures on standard closed-vocabulary COCO detection
+with 80 fixed categories --- the conventional protocol shared across the YOLO
+literature --- where YOLOv9-C achieves $54.1$ \APprimary. Chapter~III evaluates
+EnYOLO-World on open-vocabulary detection, where the model must generalise at inference
+time to object categories specified by free-form text prompts, never seen during
+training. EnYOLO-World-S achieves $43.9$ \APprimary\ under this substantially harder
+setting --- a lower absolute number than closed-vocabulary YOLOv9-C, as expected given
+both the harder task and the smaller model size (13.4M vs.\ 24.5M parameters). The
+appropriate comparison baseline for EnYOLO-World is therefore other open-vocabulary
+detectors: YOLO-World-L ($51.0$ \APprimary) and GLIP-T ($51.4$ \APprimary\ at 110.6M
+parameters), against which EnYOLO-World-L achieves $52.2$ \APprimary\ with only 26.1M
+parameters, demonstrating a superior accuracy--efficiency trade-off.
+
+
+%% ── 1.2 ─────────────────────────────────────────────────────────────────────
+\section{Literature Review}
+\label{sec:litreview}
+
+%% 1.2.1
+\subsection{YOLO-Based Object Detection}
+\label{subsec:yolo_review}
+
+Before single-stage detectors reshaped the field, object detection was dominated by
+two-stage pipelines built around region proposal mechanisms. R-CNN~\cite{girshick2014rcnn}
+demonstrated that convolutional features extracted over candidate regions could
+substantially outperform hand-crafted descriptors, though the per-region extraction
+strategy made it computationally prohibitive. Fast R-CNN~\cite{girshick2015fastrcnn}
+and Faster R-CNN~\cite{ren2015fasterrcnn} progressively addressed this by sharing
+convolutional computation across the image and introducing the Region Proposal Network
+(RPN) to replace the selective search stage, reducing inference time by an order of
+magnitude while maintaining strong accuracy on PASCAL~VOC and MS~COCO. Despite these
+improvements, the two-stage architecture's sequential pipeline --- proposal generation
+followed by classification and refinement --- remained a fundamental throughput barrier
+that prevented real-time deployment.
+
+YOLO~\cite{redmon2016yolo}, introduced by Redmon et al.\ in 2016, broke from this
+paradigm by recasting detection as a single regression problem. The input image is
+divided into a spatial grid, and each cell simultaneously predicts bounding-box
+coordinates and class probabilities in one forward pass, achieving near real-time
+inference on standard hardware. YOLOv2~\cite{redmon2017yolov2} extended this
+foundation with batch normalisation, anchor priors derived from k-means clustering of
+ground-truth boxes, and multi-scale training that improved small object recall.
+YOLOv3~\cite{redmon2018yolov3} adopted a Feature Pyramid Network
+(FPN)~\cite{lin2017fpn}-style structure for predictions at three output scales and
+replaced the Darknet backbone with Darknet-53, substantially improving accuracy on
+challenging benchmarks.
+
+YOLOv4~\cite{bochkovskiy2020yolov4} redirected attention from architecture to
+methodology. By systematically cataloguing and combining training improvements ---
+Mosaic augmentation, CutMix, DropBlock regularisation, and DIoU-NMS --- under the
+``bag of freebies'' and ``bag of specials'' frameworks, it demonstrated that training
+protocol design could yield accuracy improvements comparable to architectural changes,
+at zero additional inference cost. YOLOv5~\cite{jocher2020yolov5} translated this
+into a clean, modular PyTorch codebase with automated anchor calculation and broad
+deployment support across ONNX, TensorRT, and CoreML formats, becoming the most
+widely deployed YOLO variant in industry despite the absence of a formal academic
+publication.
+
+YOLOv7~\cite{wang2023yolov7} introduced trainable bag-of-freebies training strategies
+alongside its Extended Efficient Layer Aggregation Network (E-ELAN) backbone, which
+modified gradient flow through computational blocks to increase learning capacity
+without altering the inference architecture. YOLOv8~\cite{jocher2023yolov8} modernised
+the entire ecosystem with anchor-free decoupled detection heads, a modular C2f-based
+backbone, and a unified training API, establishing a new practical standard.
+YOLOv6~\cite{li2022yolov6} contributed RepBlock designs that applied structural
+re-parameterisation throughout the backbone, demonstrating that multi-branch training
+architectures could be algebraically merged at inference for zero-cost capacity gains.
+
+YOLOv9~\cite{wang2024yolov9} represented the most consequential architectural advance
+since the introduction of FPN-style multi-scale detection. Its GELAN backbone generalises
+the ELAN aggregation strategy by permitting arbitrary computational blocks within the
+aggregation path rather than restricting it to plain convolutions, enabling richer
+gradient flow and more diverse feature representations at each stage. More significantly,
+PGI installs auxiliary reversible branches during training that supply reliable gradient
+signals grounded in richer input semantics --- directly addressing the information
+bottleneck inherent in deep CSP-based designs. The auxiliary apparatus is discarded at
+inference, incurring zero additional latency. YOLOv10~\cite{wang2024yolov10}
+subsequently demonstrated NMS-free end-to-end detection through consistent dual
+assignments, while YOLO11~\cite{khanam2024yolo11} introduced C3k2 and C2PSA to push
+parameter efficiency further. The backbone lineage from ResNet~\cite{he2016resnet}
+through CSPNet~\cite{wang2020cspnet} to GELAN provides the architectural vocabulary
+through which the Chapter~II benchmark is interpreted and the backbone selection
+decisions in Chapters~III and~IV are justified.
+
+
+%% 1.2.2
+\subsection{Multi-Scale Fusion \& VL Detection}
+\label{subsec:multiscale_vl}
+
+Multi-scale feature fusion became central to modern detection with the introduction of
+the Feature Pyramid Network (FPN)~\cite{lin2017fpn}, which established a top-down
+pathway with lateral connections to merge high-level semantics with low-level spatial
+detail, enabling strong predictions across a wide range of object scales from a shared
+feature hierarchy. The Path Aggregation Network (PAN)~\cite{liu2018pan} augmented this
+with an additional bottom-up pathway, creating bidirectional information flow that
+allowed fine-grained localisation cues to propagate upward to semantic layers while
+high-level context propagated downward. This bidirectional design became a standard
+component in YOLOv4, YOLOv7, and YOLOv8. BiFPN, introduced as part of
+EfficientDet~\cite{tan2020efficientdet}, extended PAN with learnable scalar fusion
+weights to balance pyramid level contributions dynamically, though scalar weighting
+operates at a coarse channel-agnostic level and cannot adapt to category-specific or
+scene-specific feature characteristics.
+
+The fundamental limitation shared by all these fusion mechanisms is rigidity:
+concatenation, element-wise addition, and fixed convolutional weights treat every input
+channel identically regardless of scene content or target category. Attention-based
+modules partially address this. SE networks~\cite{hu2018se} learn channel-wise
+multiplicative recalibration weights through global average pooling and a compact
+bottleneck MLP, providing a lightweight mechanism for channel selection.
+CBAM~\cite{woo2018cbam} extends this with a spatial attention branch that identifies
+discriminative spatial regions. However, both SE and CBAM are self-conditioned --- they
+derive modulation weights exclusively from the input visual features, without access to
+any external semantic signal that could guide the network toward category-relevant
+channels. This circularity limits their effectiveness when the input features have
+already been degraded by backbone-level information loss.
+
+Feature-wise Linear Modulation (FiLM)~\cite{perez2018film} offers a qualitatively
+different approach. Rather than computing attention weights from the input itself, FiLM
+conditions per-channel scaling ($\gamma$) and shifting ($\beta$) parameters on an
+external signal --- in this dissertation, frozen CLIP text embeddings. The affine
+transformation $V'_{h,w,c} = \gamma_c \cdot V_{h,w,c} + \beta_c$ is strictly more
+expressive than purely multiplicative attention (SE) because the bias term $\beta_c$
+can shift the feature distribution rather than merely rescaling it, enabling better
+alignment with the semantic space defined by the text encoder. Crucially, because
+$\gamma$ and $\beta$ are vectors rather than matrices, FiLM maintains $O(N)$
+computational complexity where $N$ denotes the number of spatial positions, avoiding
+the quadratic cost inherent to self-attention and preserving real-time characteristics.
+Despite these properties, FiLM-based conditioning within detection necks was unexplored
+prior to the work presented in this dissertation.
+
+Vision--language detection frameworks have established that external semantic guidance
+can meaningfully improve detection accuracy and vocabulary generalisation.
+ViLD~\cite{gu2022vild} demonstrated that distilling knowledge from pretrained
+vision-language models into detection architectures enables recognition of novel
+categories not seen during training. GLIP~\cite{li2022glip} unified phrase grounding
+and object detection through grounded pretraining, achieving competitive results on
+both closed-set and open-vocabulary benchmarks. Detic~\cite{zhou2022detic} extended
+detector vocabulary by training on image-level classification labels, providing a
+complementary route to open-vocabulary capability. OVR-CNN~\cite{zareian2021ovrcnn}
+formally framed open-vocabulary detection as a zero-shot learning problem using
+visual-semantic embeddings. OWL-ViT~\cite{minderer2022owlvit} showed that standard
+vision-language models can be directly adapted for detection with minimal overhead.
+YOLO-World~\cite{cheng2024yoloworld} brought these advances into the real-time YOLO
+regime through a Re-parameterizable Vision-Language Path Aggregation Network
+(RepVL-PAN), demonstrating that text-conditioned detection is achievable at practical
+inference speeds. However, YOLO-World's conditioning applies a uniform text signal
+across all pyramid levels, ignoring the fundamental differences between shallow
+fine-grained features and deep semantic abstractions. This limitation ---
+scale-agnostic conditioning --- is the primary motivation for FiLM-PAN's scale-specific
+affine modulation design in Chapter~III.
+
+
+%% 1.2.3
+\subsection{Text--Visual Alignment \& Re-param}
+\label{subsec:textvl_reparam}
+
+Modern text--visual alignment for detection builds on contrastive vision-language
+pretraining. CLIP~\cite{radford2021clip} demonstrated that jointly training image and
+text encoders on web-scale image-text pairs through a contrastive objective produces
+representations that transfer broadly across visual tasks, including detection, without
+task-specific fine-tuning. Its frozen text encoder --- producing 512-dimensional
+embeddings from category descriptions --- has since become a standard conditioning
+signal in open-vocabulary detectors, providing fixed semantic priors that guide visual
+feature adaptation. The Vision Transformer (ViT)~\cite{dosovitskiy2021vit} backbone
+underlying CLIP processes the image as a sequence of non-overlapping patches, applying
+multi-head self-attention globally to capture long-range dependencies that convolutional
+backbones cannot efficiently model.
+
+Prompt learning emerged as an efficient paradigm for adapting large pretrained models to
+downstream tasks. In natural language processing, learnable soft prompt tokens appended
+to the input sequence of models such as GPT-4~\cite{achiam2023gpt4} and
+BERT~\cite{devlin2018bert} enabled task adaptation with minimal parameter
+updates~\cite{lester2021prompt}. Visual Prompt Tuning (VPT)~\cite{jia2022vpt}
+translated this to vision by prepending learnable tokens to the ViT input sequence,
+matching full fine-tuning performance at a small fraction of the parameter cost.
+CoOp~\cite{zhou2022coop} and CoCoOp~\cite{zhou2022cocoop} applied learnable prompts
+specifically to CLIP's text encoder for downstream recognition tasks, demonstrating
+that textual conditioning can be efficiently optimised without modifying the encoder
+weights. These methods collectively establish that lightweight learnable adapters
+inserted at the input boundary of pretrained models are sufficient to re-purpose
+general-purpose representations for specialised tasks --- a principle that motivates
+RepRTA's residual refinement approach in Chapter~IV.
+
+Applying text conditioning to a feature pyramid introduces a challenge absent from
+classification tasks: different pyramid levels encode qualitatively different
+information. The shallow level P3 (stride~8) preserves fine-grained spatial detail
+essential for small object detection, while the deep level P5 (stride~32) captures
+high-level semantic abstractions suited to large object recognition. A single uniform
+text signal applied identically across all scales risks suppressing the fine-grained
+spatial cues at P3 or under-conditioning the semantic representations at P5. This
+scale-dependent alignment problem, overlooked by YOLO-World's uniform conditioning,
+is precisely what Scale-aware RepRTA addresses in Chapter~IV by assigning independent
+learnable modulation weights per pyramid level.
+
+Structural re-parameterisation provides a complementary strategy for improving model
+capacity without inference overhead. RepVGG~\cite{ding2021repvgg} demonstrated that
+multi-branch training topologies --- comprising a $3\times3$ convolution, a $1\times1$
+convolution, and an identity shortcut --- can be algebraically merged at inference into
+a single equivalent $3\times3$ convolution. This principle captures the spirit of
+richer gradient dynamics during training (multi-path gradient flow) while eliminating
+the runtime cost of the auxiliary branches. YOLOv7 adopted this through planned
+re-parameterised convolutions, and YOLOv6 applied it throughout the backbone via
+RepBlock. YOLOv9's RepNCSP blocks extend it further within the GELAN aggregation shell.
+The SwiGLU activation function~\cite{shazeer2020glu}, a gated linear unit variant using
+a Swish gate, provides efficient non-linearity in the feed-forward components used in
+RepRTA, offering stronger feature transformation than ReLU-based alternatives at
+comparable computational cost.
+
+The RepRTA module proposed in this dissertation applies re-parameterisation to a new
+domain: text embedding refinement for vision-language detection. During training, a
+residual SwiGLU feed-forward network refines frozen CLIP text embeddings before they
+enter the FiLM-PAN fusion pathway, increasing text representation discriminability with
+respect to detection-relevant category distinctions. At inference, this auxiliary branch
+is absorbed into a single linear transformation through structural re-parameterisation
+--- the refined text embedding is precomputed and cached, incurring zero additional
+per-image overhead. This design transfers the ``rich training, lean inference''
+philosophy of RepVGG from convolutional feature extraction to semantic embedding
+refinement, constituting the central novelty of Chapter~IV.
+
+%% ── 1.3 ─────────────────────────────────────────────────────────────────────
+\section{Existing Problems}
+\label{sec:problems}
+ 
+Three unresolved problems emerge from the literature reviewed above, and each of
+them maps directly onto a major chapter of this dissertation.
+ 
+The first problem is the absence of a unified cross-version benchmark for the YOLO
+family. Although successive YOLO generations are often presented as improvements over
+their predecessors, they are typically evaluated under different training schedules,
+augmentation pipelines, optimization settings, and hardware platforms. Under such
+conditions, performance differences cannot be attributed cleanly to architecture alone.
+A reported gain may reflect a stronger backbone, but it may just as easily come from a
+longer training budget, a more favorable augmentation strategy, or a different
+evaluation environment. This makes it difficult to determine which architectural choices
+genuinely improve detection performance and efficiency, and which apparent improvements
+are partially artifacts of inconsistent experimental conditions. A controlled
+side-by-side benchmark under unified settings is therefore necessary, both to establish
+a fair comparison across YOLO generations and to guide principled backbone selection
+for subsequent chapters.
+ 
+The second problem is the joint limitation of backbone feature degradation and static
+neck fusion in real-time detectors. In CSP-based YOLO backbones, fine-grained spatial
+information is progressively weakened as features move deeper through the network,
+which can reduce recall for small, low-contrast, or partially occluded objects. At the
+same time, the standard PAN neck fuses multi-scale features through fixed operations
+that are structurally blind to scene content and insensitive to target semantics. These
+two weaknesses interact. If the backbone delivers degraded features, the neck receives
+weaker inputs; if the neck remains static, it cannot compensate adaptively for the
+loss. YOLOv9's PGI partially addresses the backbone side by improving information
+preservation during training, while modules such as SE and
+CBAM~\cite{hu2018se,woo2018cbam} provide limited forms of feature recalibration.
+However, no existing real-time detector jointly addresses both issues through a unified
+design that combines stronger feature preservation with adaptive, semantically guided
+fusion. In particular, the integration of external semantic signals, such as text
+embeddings from vision-language models, into efficient YOLO-style multi-scale fusion
+remains largely unexplored.
+ 
+The third problem is the coarse and scale-agnostic nature of existing text-visual
+alignment mechanisms in open-vocabulary detection. In frameworks such as
+YOLO-World~\cite{cheng2024yoloworld}, text embeddings are applied uniformly across
+all pyramid levels, despite the fact that those levels serve fundamentally different
+functions. Shallow feature maps such as $P_3$ retain finer spatial detail and are
+especially important for small-object localization, whereas deeper maps such as $P_5$
+are more semantically abstract and better suited to large objects and contextual
+reasoning. A single uniform conditioning signal cannot optimally serve both extremes
+of the feature hierarchy. This limitation is compounded by the fact that frozen CLIP
+embeddings are not optimized for detection-specific discrimination. They are strong
+global semantic representations, but they are not explicitly shaped for region-level
+localization and fine-grained category separation. Moreover, many existing text-visual
+interaction modules introduce non-trivial computational overhead, which weakens their
+suitability for efficient real-time detection. What is needed, therefore, is a
+lightweight mechanism that can refine text representations into a more
+detection-aligned form while also adapting their influence across pyramid levels
+according to scale-specific feature roles.
+ 
+ 
+%% ── 1.4 ─────────────────────────────────────────────────────────────────────
+\section{Main Contents and Organization of the Dissertation}
+\label{sec:organisation}
+ 
+This dissertation addresses the three problems above through three interconnected
+studies, unified by the theme of prompt-guided feature conditioning for efficient
+object detection.
+ 
+Chapter~I introduces the research background, reviews the relevant literature on
+YOLO-based detection, multi-scale fusion, vision--language methods, and
+re-parameterization techniques, identifies the open problems, and lays out the
+dissertation structure.
+ 
+Chapter~II tackles Problem~(1). Seven YOLO versions --- YOLOv5 through YOLO11 ---
+are benchmarked on COCO val2017 under unified experimental conditions. The evaluation
+spans detection accuracy (\APprimary, \APfifty, \APseventyfive), scale-specific
+performance (\APS, \APM, \APL), and efficiency metrics (parameters, FLOPs, FPS). The
+results establish YOLOv9's strengths in feature preservation and YOLO11's potential in
+computational efficiency, grounding the backbone choices made in Chapters~III and~IV.
+ 
+Chapter~III tackles Problem~(2) with EnYOLO-World. The framework pairs a
+PGI-augmented YOLOv9 GELAN backbone --- for robust feature preservation --- with a
+newly designed FiLM-Augmented Path Aggregation Network (FiLM-PAN) that uses frozen
+CLIP text embeddings to generate per-channel affine parameters for each pyramid level,
+achieving semantically guided adaptive fusion at $O(N)$ complexity. On COCO val2017,
+EnYOLO-World-L reaches $52.2$ \APprimary, outperforming YOLO-World-L by $+1.2$ AP
+and GLIP-T by $+0.8$ AP with only one quarter of the latter's parameters.
+ 
+Chapter~IV tackles Problem~(3) with three improvements. RepRTA refines CLIP text
+embeddings through a SwiGLU-based FFN that adds 1.05M parameters during training and
+fuses to zero overhead at inference, yielding $+2.2$ AP. The backbone is swapped to
+YOLO11-S for better efficiency ($+0.7$ AP with fewer parameters and FLOPs).
+Scale-aware RepRTA then assigns learnable weights per pyramid level for scale-adaptive
+text conditioning, bringing the final model to $47.2$ \APprimary\ --- a cumulative
+$+3.3$ AP over the EnYOLO-World-S baseline.
+ 
+Chapter~V summarizes the contributions, discusses limitations, and outlines future
+directions.
+
+The overall research framework is illustrated in Figure~\ref{fig:framework}.
+
+% TODO: Insert Figure 1.1 - Overall research framework diagram
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{Figures/1.1 research_framework.png}
+    \caption{Overall research framework of this dissertation.}
+    \label{fig:framework}
+\end{figure}
